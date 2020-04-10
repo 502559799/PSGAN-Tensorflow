@@ -30,15 +30,17 @@ def relu(x, name="relu"):
 # Normalization Function
 ##################################################################################
 
-def instance_norm(x, scope="instance_norm"):
+def instance_norm(x, no_affines=False, scope="instance_norm"):
 
     with tf.variable_scope(scope):
         epsilon = 1e-5
         mean, var = tf.nn.moments(x, [1,2], keep_dims=True)
         scale = tf.get_variable('scale', [x.get_shape()[-1]],initializer=tf.truncated_normal_initializer(mean=1.0, stddev=0.02))
         offset = tf.get_variable('offset', [x.get_shape()[-1]],initializer=tf.constant_initializer(0.0))
-        out = scale*tf.div(x-mean, tf.sqrt(var+epsilon)) + offset
-
+        if no_affines:
+            out = tf.div(x - mean, tf.sqrt(var + epsilon))
+        else:
+            out = scale*tf.div(x-mean, tf.sqrt(var+epsilon)) + offset
         #out = tf_contrib.layers.instance_norm(x, epsilon=1e-05, center=True, scale=True)
         return out
 
@@ -70,11 +72,11 @@ def softmax(x):
 # Layer
 ##################################################################################
 
-def general_conv2d(inputconv, channels=256, kernel=7, stride=1, padding="VALID", name="conv2d", do_norm=False, do_relu=False, relufactor=0):
+def general_conv2d(inputconv, channels=256, kernel=7, stride=1, padding="VALID", name="conv2d", do_norm=False, do_relu=False, no_affines=False, relufactor=0):
     with tf.variable_scope(name, reuse=tf.AUTO_REUSE):
         conv = tf.contrib.layers.conv2d(inputs=inputconv, num_outputs=channels, kernel_size=kernel, stride=stride, padding=padding, activation_fn=None, weights_initializer=weight_init, biases_initializer=biases_init)
         if do_norm:
-            conv = instance_norm(conv, name+'down_ins_norm')
+            conv = instance_norm(conv, no_affines, name+'down_ins_norm')
 
         if do_relu:
             if(relufactor == 0):

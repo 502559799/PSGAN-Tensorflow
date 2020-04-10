@@ -9,11 +9,12 @@ import tensorflow.contrib.slim as slim
 import random
 import dlib
 
-max_images = 42
+max_images = 20
 load_dir = "all_imgs.txt"
 lips_ft = True
 eyes_ft = True
 skin_ft = True
+use_np = True
 
 class InputData:
 
@@ -113,7 +114,7 @@ class InputData:
         num_files_B = sess.run(self.queue_length_B)
         num_files_C = sess.run(self.queue_length_C)
         num_files_D = sess.run(self.queue_length_D)
-        print("num_files A/B/C/D : %d, %d, %d. %d", num_files_A, num_files_B, num_files_C, num_files_D)
+        print("num_files A/B/C/D : ", num_files_A, num_files_B, num_files_C, num_files_D)
 
         self.fake_images_A = np.zeros((self.pool_size, 1, self.img_height, self.img_width, self.channels))
         self.fake_images_B = np.zeros((self.pool_size, 1, self.img_height, self.img_width, self.channels))
@@ -146,23 +147,24 @@ class InputData:
                         mask_A_lip = tf.cast(tf.equal(self.mask_A, 7), tf.float32) + tf.cast(tf.equal(self.mask_A, 9), tf.float32)  #   lip regions are 1 others are 0    size : [256 256 1]
                         mask_B_lip = tf.cast(tf.equal(self.mask_B, 7), tf.float32) + tf.cast(tf.equal(self.mask_B, 9), tf.float32)
                         mask_A_lip, mask_B_lip, index_A_lip, index_B_lip = self.mask_preprocess(mask_A_lip, mask_B_lip)
-                        print("mask_A_lip : ", mask_A_lip)
-                        print("mask_B_lip : ", mask_B_lip)
+                        #print("mask_A_lip : ", mask_A_lip.eval(sess))
+                        #print("mask_A_lip check nonzero : ", tf.count_nonzero(mask_A_lip).eval(sess))
+                        #print("mask_B_lip : ", mask_B_lip.eval(sess))
                     ## skin
                     if skin_ft is True:
                         mask_A_skin = tf.cast(tf.equal(self.mask_A, 1), tf.float32) + tf.cast(tf.equal(self.mask_A, 6), tf.float32) + tf.cast(tf.equal(self.mask_A, 13), tf.float32)
                         mask_B_skin = tf.cast(tf.equal(self.mask_B, 1), tf.float32) + tf.cast(tf.equal(self.mask_B, 6), tf.float32) + tf.cast(tf.equal(self.mask_B, 13), tf.float32)
                         mask_A_skin, mask_B_skin, index_A_skin, index_B_skin = self.mask_preprocess(mask_A_skin, mask_B_skin)
-                        print("mask_A_skin : ", mask_A_skin)
-                        print("mask_B_skin : ", mask_B_skin)
+                        #print("mask_A_skin : ", mask_A_skin.eval(sess))
+                        #print("mask_B_skin : ", mask_B_skin.eval(sess))
                     ## eyes
                     if eyes_ft is True:
                         mask_A_eye_left = tf.cast(tf.equal(self.mask_A, 4), tf.float32)
                         mask_A_eye_right = tf.cast(tf.equal(self.mask_A, 5), tf.float32)
-                        mask_A_eye = mask_A_eye_left + mask_A_eye_right
+
                         mask_B_eye_left = tf.cast(tf.equal(self.mask_B, 4), tf.float32)
                         mask_B_eye_right = tf.cast(tf.equal(self.mask_B, 5), tf.float32)
-                        mask_B_eye = mask_B_eye_left + mask_B_eye_right
+
                         mask_A_face = tf.cast(tf.equal(self.mask_A, 1), tf.float32) + tf.cast(tf.equal(self.mask_A, 6), tf.float32)
                         mask_B_face = tf.cast(tf.equal(self.mask_B, 1), tf.float32) + tf.cast(tf.equal(self.mask_B, 6), tf.float32)
                         # avoid the situation that images with closed eyes
@@ -171,15 +173,24 @@ class InputData:
                         # tf.cond(tf.equal(tf.count_nonzero(mask_A_eye_left), 0) and tf.equal(tf.count_nonzero(mask_B_eye_left), 0) and
                         #         tf.equal(tf.count_nonzero(mask_A_eye_right), 0) and tf.equal(tf.count_nonzero(mask_B_eye_right), 0)):
                         #     continue
-                        print("mask_A_eye_left : ", mask_A_eye_left)
-                        print("mask_A_eye_right : ", mask_A_eye_right)
-                        print("mask_A_face : ", mask_A_face)
                         mask_A_eye_left, mask_A_eye_right = self.rebound_box(mask_A_eye_left, mask_A_eye_right, mask_A_face)
                         mask_B_eye_left, mask_B_eye_right = self.rebound_box(mask_B_eye_left, mask_B_eye_right, mask_B_face)
+
+                        sess.run(mask_A_eye_left.initializer)
+                        sess.run(mask_A_eye_right.initializer)
+                        sess.run(mask_B_eye_left.initializer)
+                        sess.run(mask_B_eye_right.initializer)
+                        mask_A_eye = mask_A_eye_left + mask_A_eye_right
+                        mask_B_eye = mask_B_eye_left + mask_B_eye_right
+
                         mask_A_eye_left, mask_B_eye_left, index_A_eye_left, index_B_eye_left = \
                             self.mask_preprocess(mask_A_eye_left, mask_B_eye_left)
+
                         mask_A_eye_right, mask_B_eye_right, index_A_eye_right, index_B_eye_right = \
                             self.mask_preprocess(mask_A_eye_right, mask_B_eye_right)
+
+                        mask_A_eye, mask_B_eye, index_A_eye, index_B_eye = \
+                            self.mask_preprocess(mask_A_eye, mask_B_eye)
                         print("mask_A_eye_left : ", mask_A_eye_left)
                         print("mask_A_eye_right : ", mask_A_eye_right)
                         print("mask_B_eye_left : ", mask_B_eye_left)
@@ -194,6 +205,7 @@ class InputData:
                     if image_tensor_A.size == self.img_height * self.img_width * self.channels and mask_tensor_A.size == self.img_height * self.img_width * 1:
                         temp_image = ((image_tensor_A + 1) * 127.5).astype(np.uint8)
                         temp_mask = mask_tensor_A.astype(np.uint8)
+                        self.A_input[cnt_A] = image_tensor_A.reshape(self.batch_size, self.img_height, self.img_width, self.channels)
                         self.A_landmark[cnt_A] = self.get_keypoints(temp_image, self.detector, self.predictor)
                         self.A_input_mask[cnt_A][0] = sess.run(mask_A_lip)[:,:,0] # [256, 256, 1] ---> [256, 256]   type: bool
                         self.A_input_mask[cnt_A][1] = sess.run(mask_A_eye)[:,:,0]
@@ -209,6 +221,7 @@ class InputData:
                     if image_tensor_B.size == self.img_height * self.img_width * self.channels and mask_tensor_B.size == self.img_height * self.img_width * 1:
                         temp_image = ((image_tensor_B + 1) * 127.5).astype(np.uint8)
                         temp_mask = mask_tensor_B.astype(np.uint8)
+                        self.B_input[cnt_B] = image_tensor_B.reshape(self.batch_size, self.img_height, self.img_width, self.channels)
                         self.B_landmark[cnt_B] = self.get_keypoints(temp_image, self.detector, self.predictor)
                         self.B_input_mask[cnt_B][0] = sess.run(mask_B_lip)[:,:,0]
                         self.B_input_mask[cnt_B][1] = sess.run(mask_B_eye)[:,:,0]
@@ -221,6 +234,7 @@ class InputData:
                 fw = open(load_dir, "wb")
                 pickle.dump(self.A_landmark, fw)
                 pickle.dump(self.B_landmark, fw)
+                pickle.dump(self.A_input_mask, fw)
                 pickle.dump(self.B_input_mask, fw)
                 #pickle.dump(self.A_mask_G, fw)
                 #pickle.dump(self.B_mask_G, fw)
@@ -342,63 +356,92 @@ class InputData:
             cv2.fillPoly(face_mask, [np.array(temp[48:60]).reshape((-1, 1, 2))], (0, 0, 0))
             return lip_mask,eye_mask,face_mask
 
+    # def get_mask2(self, input_mask, scope='get_mask2'): #input_mask is np array
+    #     ## lip
+    #     if lips_ft is True:
+    #         if not use_np:
+    #             # mask_lip = tf.cast(tf.equal(input_mask, 7), tf.float32) + tf.cast(tf.equal(input_mask, 9), tf.float32)  #   lip regions are 1 others are 0    size : [256 256 1]
+    #             # mask_lip index_lip = self.mask_preprocess2(input_mask)
+    #         else:
+    #             mask_lip = (input_mask == 7).astype('float32') + (input_mask == 9).astype('float32')
+    #     ## skin
+    #     if skin_ft is True:
+    #         if not use_np:
+    #             mask_skin = tf.cast(tf.equal(input_mask, 1), tf.float32) + tf.cast(tf.equal(input_mask, 6), tf.float32) + tf.cast(tf.equal(input_mask, 13), tf.float32)
+    #             mask_skin, index_skin = self.mask_preprocess2(mask_skin)
+    #         else:
+    #             mask_skin = (input_mask == 1).astype('float32') + (input_mask == 6).astype('float32') + (input_mask == 13).astype('float32')
+    #     ## eyes
+    #     if eyes_ft is True:
+    #         if not use_np:
+    #             mask_eye_left = tf.cast(tf.equal(input_mask, 4), tf.float32)
+    #             mask_eye_right = tf.cast(tf.equal(input_mask, 5), tf.float32)
+    #             mask_face = tf.cast(tf.equal(input_mask, 1), tf.float32) + tf.cast(tf.equal(input_mask, 6), tf.float32)
+    #         else:
+    #             mask_eye_left = (input_mask == 4).astype('float32')
+    #             mask_eye_right = (input_mask == 5).astype('float32')
+    #             mask_face = (input_mask == 1).astype('float32') + (input_mask == 6).astype('float32')
+    #     # avoid the situation that images with closed eyes
+    #     if not (mask_eye_left > 0).any() and (mask_eye_right).any()
 
-    def rebound_box(self, mask_A, mask_B, mask_A_face):
-        index_tmp = tf.where(tf.equal(mask_A, 1.0))  #256*256*1  --> ? * 3
-        print("index_tmp : ", index_tmp)
-        x_A_index = index_tmp[:, 1]  #2-D ? * 1
-        y_A_index = index_tmp[:, 0]
-        index_tmp = tf.where(tf.equal(mask_B, 1.0))
-        x_B_index = index_tmp[:, 1]  # 256 * 1
-        y_B_index = index_tmp[:, 0]
-        print("rebound x_A_index : ", x_A_index)
-        print("rebound y_A_index : ", y_A_index)
-        print("rebound x_B_index : ", x_B_index)
-        print("rebound y_B_index : ", y_B_index)
-        # with tf.variable_scope('rebound_box'):
-        ## use numpy to calc
-        # mA_tmp = mask_A.eval()
-        # print("mA_tmp : ", mA_tmp.shape)
-        # mA_face_tmp = mask_A_face.eval()
-        # print("mA_face_tmp : ", mA_face_tmp.shape)
-        # mB_tmp = mask_B.eval()
 
-        # print("MIN x_A_index: ", min(x_A_index.eval()))
-        # print("MAX x_A_index: ", max(x_A_index.eval()))
-        # print("MIN y_A_index: ", min(y_A_index.eval()))
-        # print("MAX y_A_index: ", max(y_A_index.eval()))
-        # min_xA_idx = min(x_A_index.eval()) - 10
-        # max_xA_idx = max(x_A_index.eval()) + 11
-        # min_yA_idx = min(y_A_index.eval()) - 10
-        # max_yA_idx = max(y_A_index.eval()) + 11
-        # min_xB_idx = min(x_B_index.eval()) - 10
-        # max_xB_idx = max(x_B_index.eval()) + 11
-        # min_yB_idx = min(y_B_index.eval()) - 10
-        # max_yB_idx = max(y_B_index.eval()) + 11
+    def rebound_box(self, mask_A, mask_B, mask_A_face, scope='rebound_box'):
+        with tf.variable_scope(scope, reuse=True):
+            index_tmp = tf.where(tf.equal(mask_A, 1.0))  #256*256*1  --> ? * 3
+            print("index_tmp : ", index_tmp)
+            x_A_index = index_tmp[:, 1]  #2-D ? * 1
+            y_A_index = index_tmp[:, 0]
+            index_tmp = tf.where(tf.equal(mask_B, 1.0))
+            x_B_index = index_tmp[:, 1]  # 256 * 1
+            y_B_index = index_tmp[:, 0]
+            print("rebound x_A_index : ", x_A_index)
+            print("rebound y_A_index : ", y_A_index)
+            print("rebound x_B_index : ", x_B_index)
+            print("rebound y_B_index : ", y_B_index)
+            # with tf.variable_scope('rebound_box'):
+            ## use numpy to calc
+            # mA_tmp = mask_A.eval()
+            # print("mA_tmp : ", mA_tmp.shape)
+            # mA_face_tmp = mask_A_face.eval()
+            # print("mA_face_tmp : ", mA_face_tmp.shape)
+            # mB_tmp = mask_B.eval()
 
-        mask_A_tmp = tf.Variable(mask_A, validate_shape=False)
-        mask_B_tmp = tf.Variable(mask_B, validate_shape=False)
-        min_xA_idx = tf.argmin(x_A_index) - 10
-        max_xA_idx = tf.argmax(x_A_index) + 11
-        min_yA_idx = tf.argmin(y_A_index) - 10
-        max_yA_idx = tf.argmax(y_A_index) + 11
-        min_xB_idx = tf.argmin(x_B_index) - 10
-        max_xB_idx = tf.argmax(x_B_index) + 11
-        min_yB_idx = tf.argmin(y_B_index) - 10
-        max_yB_idx = tf.argmax(y_B_index) + 11
-        #mA_tmp[min(x_A_index.eval())-10:max(x_A_index.eval())+11, min(y_A_index.eval())-10:max(y_A_index.eval())+11, :] = \
-        #       mA_face_tmp[min(x_A_index.eval())-10:max(x_A_index.eval())+11, min(y_A_index.eval())-10:max(y_A_index.eval())+11, :]
-        mask_A_tmp[min_xA_idx:max_xA_idx, min_yA_idx:max_yA_idx, :].assign(mask_A_face[min_xA_idx:max_xA_idx, min_yA_idx:max_yA_idx, :])
-        print("mA_tmp", mask_A_tmp)
-        #mB_tmp[min(x_B_index.eval())-10:max(x_B_index.eval())+11, min(y_B_index.eval())-10:max(y_B_index.eval())+11, :] = \
-                #mA_face_tmp[min(x_B_index.eval())-10:max(x_B_index.eval())+11, min(y_B_index.eval())-10:max(y_B_index.eval())+11, :]
-        mask_B_tmp[min_xB_idx:max_xB_idx, min_yB_idx:max_yB_idx, :].assign(mask_A_face[min_xB_idx:max_xB_idx, min_yB_idx:max_yB_idx, :])
-        print("mB_tmp", mask_B_tmp)
+            # print("MIN x_A_index: ", min(x_A_index.eval()))
+            # print("MAX x_A_index: ", max(x_A_index.eval()))
+            # print("MIN y_A_index: ", min(y_A_index.eval()))
+            # print("MAX y_A_index: ", max(y_A_index.eval()))
+            # min_xA_idx = min(x_A_index.eval()) - 10
+            # max_xA_idx = max(x_A_index.eval()) + 11
+            # min_yA_idx = min(y_A_index.eval()) - 10
+            # max_yA_idx = max(y_A_index.eval()) + 11
+            # min_xB_idx = min(x_B_index.eval()) - 10
+            # max_xB_idx = max(x_B_index.eval()) + 11
+            # min_yB_idx = min(y_B_index.eval()) - 10
+            # max_yB_idx = max(y_B_index.eval()) + 11
 
-        # convert tensor to var
-        #mask_A_tmp = sess.run(mask_A_tmp)
-        #mask_B_tmp = sess.run(mask_B_tmp)
-        return mask_A_tmp, mask_B_tmp
+            mask_A_tmp = tf.Variable(mask_A, validate_shape=False)
+            mask_B_tmp = tf.Variable(mask_B, validate_shape=False)
+            min_xA_idx = tf.argmin(x_A_index) - 10
+            max_xA_idx = tf.argmax(x_A_index) + 11
+            min_yA_idx = tf.argmin(y_A_index) - 10
+            max_yA_idx = tf.argmax(y_A_index) + 11
+            min_xB_idx = tf.argmin(x_B_index) - 10
+            max_xB_idx = tf.argmax(x_B_index) + 11
+            min_yB_idx = tf.argmin(y_B_index) - 10
+            max_yB_idx = tf.argmax(y_B_index) + 11
+            #mA_tmp[min(x_A_index.eval())-10:max(x_A_index.eval())+11, min(y_A_index.eval())-10:max(y_A_index.eval())+11, :] = \
+            #       mA_face_tmp[min(x_A_index.eval())-10:max(x_A_index.eval())+11, min(y_A_index.eval())-10:max(y_A_index.eval())+11, :]
+            mask_A_tmp[min_xA_idx:max_xA_idx, min_yA_idx:max_yA_idx, :].assign(mask_A_face[min_xA_idx:max_xA_idx, min_yA_idx:max_yA_idx, :])
+            print("mA_tmp", mask_A_tmp)
+            #mB_tmp[min(x_B_index.eval())-10:max(x_B_index.eval())+11, min(y_B_index.eval())-10:max(y_B_index.eval())+11, :] = \
+                    #mA_face_tmp[min(x_B_index.eval())-10:max(x_B_index.eval())+11, min(y_B_index.eval())-10:max(y_B_index.eval())+11, :]
+            mask_B_tmp[min_xB_idx:max_xB_idx, min_yB_idx:max_yB_idx, :].assign(mask_A_face[min_xB_idx:max_xB_idx, min_yB_idx:max_yB_idx, :])
+            print("mB_tmp", mask_B_tmp)
+
+            # convert tensor to var
+            #mask_A_tmp = sess.run(mask_A_tmp)
+            #mask_B_tmp = sess.run(mask_B_tmp)
+            return mask_A_tmp, mask_B_tmp
 
 
     def mask_preprocess(self, mask_A, mask_B):
@@ -415,6 +458,15 @@ class InputData:
         index = [x_A_index, y_A_index, x_B_index, y_B_index]
         index_2 = [x_B_index, y_B_index, x_A_index, y_A_index]
         return mask_A, mask_B, index, index_2
+
+    def mask_preprocess2(self, mask):
+        index_tmp = tf.where(tf.equal(mask, 1.0))  #
+        x_index = index_tmp[:, 1]
+        y_index = index_tmp[:, 0]
+        # re-convert float to bool
+        mask = tf.cast(mask_A, tf.bool)
+        index = [x_index, y_index]
+        return mask, index
 
     def get_keypoints(self, img, detector, predictor):
         img_gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
