@@ -8,7 +8,7 @@ def parse_args():
     desc = "Tensorflow implementation of PSGAN"
     parser = argparse.ArgumentParser(description=desc)
     parser.add_argument('-ph', '--phase', type=str, default='train', help='train or test')
-    parser.add_argument('-ds', '--dataset', type=str, default='Makeup_dataset', help='dataset name')
+    parser.add_argument('-ds', '--dataset', type=str, default='Makeup_dataset_full', help='dataset name')
     
     parser.add_argument('-ep', '--epoch', type=int, default=50, help='The number of epochs to run')
     parser.add_argument('-it', '--iteration', type=int, default=10000, help='The number of training iterations')
@@ -42,7 +42,7 @@ def parse_args():
     parser.add_argument('--mdn_n_res', type=int, default=3, help='The number of resblock in MDNet')
     parser.add_argument('--man_n_res', type=int, default=3, help='The number of resblock in MANet')
     parser.add_argument('--mdn_ch', type=int, default=64, help='The number of resblock in MDNet')
-    parser.add_argument('--man_ch', type=int, default=64, help='The number of resblock in MDNet')
+    parser.add_argument('--man_ch', type=int, default=64, help='The number of resblock in MANet')
     #parser.add_argument('--n_dis', type=int, default=6, help='The number of discriminator layer')
     #parser.add_argument('--n_critic', type=int, default=5, help='The number of critic')
 
@@ -111,7 +111,7 @@ def main():
             print(" [*] Test finished!")
 
         # show network architeture
-        show_all_variables()
+       # show_all_variables()
     
 if __name__ == '__main__':
     main()

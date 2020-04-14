@@ -9,7 +9,7 @@ import tensorflow.contrib.slim as slim
 import random
 import dlib
 
-max_images = 20
+max_images = 900
 load_dir = "all_imgs.txt"
 lips_ft = True
 eyes_ft = True
@@ -32,7 +32,7 @@ class InputData:
         check_folder(self.data_path_A)
         self.data_path_B = os.path.join(data_path, 'train/images/makeup/')
         check_folder(self.data_path_B)
-        self.data_path_C = os.path.join(data_path, 'train/segs/non-makeup/')
+        self.data_path_C = os.path.join(data_path, 'train/segs/non-makup/')
         check_folder(self.data_path_C)
         self.data_path_D = os.path.join(data_path, 'train/segs/makeup/')
         check_folder(self.data_path_D)
@@ -398,26 +398,6 @@ class InputData:
             print("rebound y_A_index : ", y_A_index)
             print("rebound x_B_index : ", x_B_index)
             print("rebound y_B_index : ", y_B_index)
-            # with tf.variable_scope('rebound_box'):
-            ## use numpy to calc
-            # mA_tmp = mask_A.eval()
-            # print("mA_tmp : ", mA_tmp.shape)
-            # mA_face_tmp = mask_A_face.eval()
-            # print("mA_face_tmp : ", mA_face_tmp.shape)
-            # mB_tmp = mask_B.eval()
-
-            # print("MIN x_A_index: ", min(x_A_index.eval()))
-            # print("MAX x_A_index: ", max(x_A_index.eval()))
-            # print("MIN y_A_index: ", min(y_A_index.eval()))
-            # print("MAX y_A_index: ", max(y_A_index.eval()))
-            # min_xA_idx = min(x_A_index.eval()) - 10
-            # max_xA_idx = max(x_A_index.eval()) + 11
-            # min_yA_idx = min(y_A_index.eval()) - 10
-            # max_yA_idx = max(y_A_index.eval()) + 11
-            # min_xB_idx = min(x_B_index.eval()) - 10
-            # max_xB_idx = max(x_B_index.eval()) + 11
-            # min_yB_idx = min(y_B_index.eval()) - 10
-            # max_yB_idx = max(y_B_index.eval()) + 11
 
             mask_A_tmp = tf.Variable(mask_A, validate_shape=False)
             mask_B_tmp = tf.Variable(mask_B, validate_shape=False)

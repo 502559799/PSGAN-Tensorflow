@@ -358,7 +358,6 @@ class PSGAN(object):
         """
         with tf.variable_scope(scope, reuse=False):
             f = 4
-            # 目前的spectral normlization 有点问题
             print("discriminator input : ", input_gen)
             oc_1 = general_conv2d(input_gen,64,f,2,"SAME",name="dis_c1",do_norm=False,relufactor=0.2)  # 1*128*128*64
             oc_2 = general_conv2d(oc_1,128,f,2,"SAME",name="dis_c2",do_norm=False,do_relu=True,relufactor=0.2)  # 1*64*64*128
@@ -381,59 +380,48 @@ class PSGAN(object):
         self.input_S_mask = tf.placeholder(tf.bool, [3, self.img_height, self.img_width], name="input_S_mask")
         self.input_R_mask = tf.placeholder(tf.bool, [3, self.img_height, self.img_width], name="input_R_mask")
 
-        # self.S_mask_G = tf.placeholder(tf.bool, [self.img_height, img_width, 1], name='S_mask_G')  # a full mask for genrator [256, 256, 1]
-        # self.R_mask_G = tf.placeholder(tf.bool, [self.img_height, img_width, 1], name='S_mask_R')
-
         self.fake_pool_S = tf.placeholder(tf.float32, [None, self.img_height, self.img_width, self.img_ch], name="fake_pool_S")
         self.fake_pool_R = tf.placeholder(tf.float32, [None, self.img_height, self.img_width, self.img_ch], name="fake_pool_R")
 
         self.num_fake_inputs = 0
         self.global_step = tf.Variable(0, name="global_step", trainable=False)
 
-        # self.landmarks_S = tf.compat.v1.placeholder(tf.int32, [self.batch_size, 68, 2], name='landmarks_S')
-        # self.landmarks_R = tf.compat.v1.placeholder(tf.int32, [self.batch_size, 68, 2], name='landmarks_R')
         self.landmarks_S = tf.placeholder(tf.int32, [68, 2], name='landmarks_S')
         self.landmarks_R = tf.placeholder(tf.int32, [68, 2], name='landmarks_R')
-
-        # self.landmarks_fake_pool_S = tf.placeholder(tf.float32, [None, 68, 2], name='landmarks_fake_pool_S')
-        # self.landmarks_fake_pool_R = tf.placeholder(tf.float32, [None, 68, 2], name='landmarks_fake_pool_R')
-
-        # self.predictor = dlib.shape_predictor("./preTrainedModel/shape_predictor_68_face_landmarks.dat")
-        # self.detector = dlib.get_frontal_face_detector()
 
         optimizer = tf.train.AdamOptimizer(self.lr, beta1=0.5)  # beta1 衰减率/* ref BeautyGAN */
         with tf.variable_scope("Model") as scope:
             self.fake_Ss = []
             self.fake_Rs = []
+            with tf.device("/gpu:0"):
+                self.fake_S = self.build_generator(self.input_S, self.input_R, self.landmarks_S, self.landmarks_R,
+                                                    self.input_S_mask, self.input_R_mask, reuse=False, scope="generator")  # G(x,y)
+                self.fake_R = self.build_generator(self.input_R, self.input_S, self.landmarks_R, self.landmarks_S,
+                                                    self.input_R_mask, self.input_S_mask, reuse=True, scope="generator")  # G(y,x)
+                self.fake_Ss.append(self.fake_S)   #  data parallelism
+                self.fake_Rs.append(self.fake_R)
+                self.rec_S = self.build_discriminator(self.input_S, scope='d_S')                        # D(x)
+                self.rec_R = self.build_discriminator(self.input_R, scope='d_R')                        # D(y)
 
-            self.fake_S = self.build_generator(self.input_S, self.input_R, self.landmarks_S, self.landmarks_R,
-                                                self.input_S_mask, self.input_R_mask, reuse=False, scope="generator")  # G(x,y)
-            self.fake_R = self.build_generator(self.input_R, self.input_S, self.landmarks_R, self.landmarks_S,
-                                                self.input_R_mask, self.input_S_mask, reuse=True, scope="generator")  # G(y,x)
-            self.fake_Ss.append(self.fake_S)   #  data parallelism
-            self.fake_Rs.append(self.fake_R)
-            self.rec_S = self.build_discriminator(self.input_S, scope='d_S')                        # D(x)
-            self.rec_R = self.build_discriminator(self.input_R, scope='d_R')                        # D(y)
+                scope.reuse_variables()
 
-            scope.reuse_variables()
+                self.fake_rec_S = self.build_discriminator(self.fake_S, scope='d_S')                    # D(G(x,y))
+                self.fake_rec_R = self.build_discriminator(self.fake_R, scope='d_R')                    # D(G(y,x))
+                self.cyc_S = self.build_generator(self.fake_S, self.input_S, self.landmarks_S, self.landmarks_S, self.input_S_mask, self.input_S_mask, reuse=True, scope='generator')         # G(G(x,y), x)
+                self.cyc_R = self.build_generator(self.fake_R, self.input_R, self.landmarks_R, self.landmarks_R, self.input_R_mask, self.input_R_mask, reuse=True, scope='generator')         # G(G(y,x), y)
 
-            self.fake_rec_S = self.build_discriminator(self.fake_S, scope='d_S')                    # D(G(x,y))
-            self.fake_rec_R = self.build_discriminator(self.fake_R, scope='d_R')                    # D(G(y,x))
-            self.cyc_S = self.build_generator(self.fake_S, self.input_S, self.landmarks_S, self.landmarks_S, self.input_S_mask, self.input_S_mask, reuse=True, scope='generator')         # G(G(x,y), x)
-            self.cyc_R = self.build_generator(self.fake_R, self.input_R, self.landmarks_R, self.landmarks_R, self.input_R_mask, self.input_R_mask, reuse=True, scope='generator')         # G(G(y,x), y)
+                scope.reuse_variables()
 
-            scope.reuse_variables()
+                self.fake_pool_rec_S = self.build_discriminator(self.fake_pool_S, 'd_S')
+                self.fake_pool_rec_R = self.build_discriminator(self.fake_pool_R, 'd_R')
 
-            self.fake_pool_rec_S = self.build_discriminator(self.fake_pool_S, 'd_S')
-            self.fake_pool_rec_R = self.build_discriminator(self.fake_pool_R, 'd_R')
-
-            self.perc_S = tf.cast(tf.image.resize_images((self.input_S+1)*127.5,[224,224]),tf.float32)  # resize to 224 for inputs requiement of vgg-16
-            self.perc_R = tf.cast(tf.image.resize_images((self.input_R+1)*127.5, [224, 224]), tf.float32)
-            self.perc_fake_S = tf.cast(tf.image.resize_images((self.fake_S+1)*127.5, [224, 224]), tf.float32)
-            self.perc_fake_R = tf.cast(tf.image.resize_images((self.fake_R+1)*127.5, [224, 224]), tf.float32)
-            self.perc = self.perc_loss_cal(tf.concat([self.perc_S,self.perc_R,self.perc_fake_S,self.perc_fake_R],axis=0))
-            percep_norm,var = tf.nn.moments(self.perc, [1, 2], keep_dims=True)
-            self.perc = tf.divide(self.perc,tf.add(percep_norm,1e-5))
+                self.perc_S = tf.cast(tf.image.resize_images((self.input_S+1)*127.5,[224,224]),tf.float32)  # resize to 224 for inputs requiement of vgg-16
+                self.perc_R = tf.cast(tf.image.resize_images((self.input_R+1)*127.5, [224, 224]), tf.float32)
+                self.perc_fake_S = tf.cast(tf.image.resize_images((self.fake_S+1)*127.5, [224, 224]), tf.float32)
+                self.perc_fake_R = tf.cast(tf.image.resize_images((self.fake_R+1)*127.5, [224, 224]), tf.float32)
+                self.perc = self.perc_loss_cal(tf.concat([self.perc_S,self.perc_R,self.perc_fake_S,self.perc_fake_R],axis=0))
+                percep_norm,var = tf.nn.moments(self.perc, [1, 2], keep_dims=True)
+                self.perc = tf.divide(self.perc,tf.add(percep_norm,1e-5))
 
 
     ##################################################################################
@@ -495,137 +483,138 @@ class PSGAN(object):
         "Adversarial loss"
         '''BeautyGAN replace negative log likelihood objective in adv_loss by a least square loss
            to stablize the training procedure and generate high quality images'''
-        g_loss_S = tf.reduce_mean(tf.squared_difference(self.fake_rec_S, 1))  # train the G to minimize  (D(G(x,y)) - 1)^2
-        g_loss_R = tf.reduce_mean(tf.squared_difference(self.fake_rec_R, 1))
+        with tf.device("/gpu:0"):
+            g_loss_S = tf.reduce_mean(tf.squared_difference(self.fake_rec_S, 1))  # train the G to minimize  (D(G(x,y)) - 1)^2
+            g_loss_R = tf.reduce_mean(tf.squared_difference(self.fake_rec_R, 1))
 
-        d_loss_S = (tf.reduce_mean(tf.square(self.fake_pool_rec_S)) + tf.reduce_mean(tf.squared_difference(self.rec_S, 1))) / 2.0
-        d_loss_R = (tf.reduce_mean(tf.square(self.fake_pool_rec_R)) + tf.reduce_mean(tf.squared_difference(self.rec_R, 1))) / 2.0
-        d_loss = (d_loss_S + d_loss_R)
+            d_loss_S = (tf.reduce_mean(tf.square(self.fake_pool_rec_S)) + tf.reduce_mean(tf.squared_difference(self.rec_S, 1))) / 2.0
+            d_loss_R = (tf.reduce_mean(tf.square(self.fake_pool_rec_R)) + tf.reduce_mean(tf.squared_difference(self.rec_R, 1))) / 2.0
+            d_loss = (d_loss_S + d_loss_R)
 
-        "Cycle consistency loss"
-        #cyc_loss = tf.reduce_mean(tf.abs(G(G(x,y),x) - x)) + tf.reduce_mean(tf.abs(G(G(y,x),y) - y))
-        cyc_loss = tf.reduce_mean(tf.abs(self.cyc_S - self.input_S)) + tf.reduce_mean(tf.abs(self.cyc_R - self.input_R))
+            "Cycle consistency loss"
+            #cyc_loss = tf.reduce_mean(tf.abs(G(G(x,y),x) - x)) + tf.reduce_mean(tf.abs(G(G(y,x),y) - y))
+            cyc_loss = tf.reduce_mean(tf.abs(self.cyc_S - self.input_S)) + tf.reduce_mean(tf.abs(self.cyc_R - self.input_R))
 
-        "Perceptual loss"
-        #perceptual_loss = tf.reduce_mean(tf.squared_difference(F(G(x,y)), F(x))) + tf.reduce_mean(tf.squared_difference(F(G(y,x)), F(y)))
-        perceptual_loss = tf.reduce_mean(tf.squared_difference(self.perc[2], self.perc[0])) + tf.reduce_mean(tf.squared_difference(self.perc[3], self.perc[1]))
+            "Perceptual loss"
+            #perceptual_loss = tf.reduce_mean(tf.squared_difference(F(G(x,y)), F(x))) + tf.reduce_mean(tf.squared_difference(F(G(y,x)), F(y)))
+            perceptual_loss = tf.reduce_mean(tf.squared_difference(self.perc[2], self.perc[0])) + tf.reduce_mean(tf.squared_difference(self.perc[3], self.perc[1]))
 
-        "Makeup loss"
-        '''calculate histogram loss on rgb channel respectively and recombine them'''
-        '''||G(x,y) - HW(x,y)||_2'''
-        temp_fake_S = tf.cast((self.fake_S[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
-        temp_S = tf.cast((self.input_S[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
-        temp_R = tf.cast((self.input_R[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
-        histogram_loss_lip_r = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[0], self.input_R_mask[0])
-        histogram_loss_eye_r = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[1], self.input_R_mask[1])
-        #histogram_loss_face_r = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[2], self.input_R_mask[2])
-        #S_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r + histogram_loss_face_r
-        S_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r
+            "Makeup loss"
+            '''calculate histogram loss on rgb channel respectively and recombine them'''
+            '''||G(x,y) - HW(x,y)||_2'''
+            temp_fake_S = tf.cast((self.fake_S[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
+            temp_S = tf.cast((self.input_S[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
+            temp_R = tf.cast((self.input_R[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
+            histogram_loss_lip_r = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[0], self.input_R_mask[0])
+            histogram_loss_eye_r = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[1], self.input_R_mask[1])
+            #histogram_loss_face_r = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[2], self.input_R_mask[2])
+            #S_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r + histogram_loss_face_r
+            S_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r
 
-        temp_fake_S = tf.cast((self.fake_S[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
-        temp_S = tf.cast((self.input_S[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
-        temp_R = tf.cast((self.input_R[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
-        histogram_loss_lip_g = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[0], self.input_R_mask[0])
-        histogram_loss_eye_g = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[1], self.input_R_mask[1])
-        #histogram_loss_face_g = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[2], self.input_R_mask[2])
-        #S_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g + histogram_loss_face_g
-        S_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g
+            temp_fake_S = tf.cast((self.fake_S[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
+            temp_S = tf.cast((self.input_S[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
+            temp_R = tf.cast((self.input_R[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
+            histogram_loss_lip_g = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[0], self.input_R_mask[0])
+            histogram_loss_eye_g = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[1], self.input_R_mask[1])
+            #histogram_loss_face_g = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[2], self.input_R_mask[2])
+            #S_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g + histogram_loss_face_g
+            S_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g
 
-        temp_fake_S = tf.cast((self.fake_S[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
-        temp_S = tf.cast((self.input_S[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
-        temp_R = tf.cast((self.input_R[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
-        histogram_loss_lip_b = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[0], self.input_R_mask[0])
-        histogram_loss_eye_b = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[1], self.input_R_mask[1])
-        #histogram_loss_face_b = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[2], self.input_R_mask[2])
-        #S_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b + histogram_loss_face_b
-        S_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b
-
-
-        S_histogram_loss = S_histogram_loss_r + S_histogram_loss_g + S_histogram_loss_b
+            temp_fake_S = tf.cast((self.fake_S[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
+            temp_S = tf.cast((self.input_S[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
+            temp_R = tf.cast((self.input_R[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
+            histogram_loss_lip_b = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[0], self.input_R_mask[0])
+            histogram_loss_eye_b = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[1], self.input_R_mask[1])
+            #histogram_loss_face_b = self.histogram_loss_cal(temp_fake_S, temp_S, temp_R, self.input_S_mask[2], self.input_R_mask[2])
+            #S_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b + histogram_loss_face_b
+            S_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b
 
 
-        '''||G(y,x) - HW(y,x)||_2'''
-        temp_fake_R = tf.cast((self.fake_R[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
-        temp_S = tf.cast((self.input_S[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
-        temp_R = tf.cast((self.input_R[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
-        histogram_loss_lip_r = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[0], self.input_S_mask[0])
-        histogram_loss_eye_r = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[1], self.input_S_mask[1])
-        #histogram_loss_face_r = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[2], self.input_S_mask[2])
-        #R_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r + histogram_loss_face_r
-        R_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r
+            S_histogram_loss = S_histogram_loss_r + S_histogram_loss_g + S_histogram_loss_b
 
-        temp_fake_R = tf.cast((self.fake_R[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
-        temp_S = tf.cast((self.input_S[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
-        temp_R = tf.cast((self.input_R[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
-        histogram_loss_lip_g = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[0], self.input_S_mask[0])
-        histogram_loss_eye_g = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[1], self.input_S_mask[1])
-        #histogram_loss_face_g = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[2], self.input_S_mask[2])
-        #R_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g + histogram_loss_face_g
-        R_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g
 
-        temp_fake_R = tf.cast((self.fake_R[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
-        temp_S = tf.cast((self.input_S[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
-        temp_R = tf.cast((self.input_R[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
-        histogram_loss_lip_b = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[0], self.input_S_mask[0])
-        histogram_loss_eye_b = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[1], self.input_S_mask[1])
-        #histogram_loss_face_b = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[2], self.input_S_mask[2])
-        #R_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b + histogram_loss_face_b
-        R_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b
+            '''||G(y,x) - HW(y,x)||_2'''
+            temp_fake_R = tf.cast((self.fake_R[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
+            temp_S = tf.cast((self.input_S[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
+            temp_R = tf.cast((self.input_R[0, :, :, 0] + 1) * 127.5, dtype=tf.float32)
+            histogram_loss_lip_r = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[0], self.input_S_mask[0])
+            histogram_loss_eye_r = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[1], self.input_S_mask[1])
+            #histogram_loss_face_r = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[2], self.input_S_mask[2])
+            #R_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r + histogram_loss_face_r
+            R_histogram_loss_r = histogram_loss_lip_r + histogram_loss_eye_r
 
-        R_histogram_loss = R_histogram_loss_r + R_histogram_loss_g + R_histogram_loss_b
-        makeup_loss = S_histogram_loss + R_histogram_loss
+            temp_fake_R = tf.cast((self.fake_R[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
+            temp_S = tf.cast((self.input_S[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
+            temp_R = tf.cast((self.input_R[0, :, :, 1] + 1) * 127.5, dtype=tf.float32)
+            histogram_loss_lip_g = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[0], self.input_S_mask[0])
+            histogram_loss_eye_g = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[1], self.input_S_mask[1])
+            #histogram_loss_face_g = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[2], self.input_S_mask[2])
+            #R_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g + histogram_loss_face_g
+            R_histogram_loss_g = histogram_loss_lip_g + histogram_loss_eye_g
 
-        "Total loss"
-        g_loss = self.adv_ld * (-1) * (g_loss_S + g_loss_R) + self.cyc_ld * cyc_loss + self.per_ld * perceptual_loss + self.make_ld * makeup_loss
-        d_loss = self.adv_ld * (-1) * d_loss
+            temp_fake_R = tf.cast((self.fake_R[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
+            temp_S = tf.cast((self.input_S[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
+            temp_R = tf.cast((self.input_R[0, :, :, 2] + 1) * 127.5, dtype=tf.float32)
+            histogram_loss_lip_b = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[0], self.input_S_mask[0])
+            histogram_loss_eye_b = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[1], self.input_S_mask[1])
+            #histogram_loss_face_b = self.histogram_loss_cal(temp_fake_R, temp_R, temp_S, self.input_R_mask[2], self.input_S_mask[2])
+            #R_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b + histogram_loss_face_b
+            R_histogram_loss_b = histogram_loss_lip_b + histogram_loss_eye_b
 
-        optimizer = tf.train.AdamOptimizer(self.lr, beta1=0.5)
+            R_histogram_loss = R_histogram_loss_r + R_histogram_loss_g + R_histogram_loss_b
+            makeup_loss = S_histogram_loss + R_histogram_loss
 
-        self.model_vars = tf.trainable_variables()
+            "Total loss"
+            g_loss = self.adv_ld * (-1) * (g_loss_S + g_loss_R) + self.cyc_ld * cyc_loss + self.per_ld * perceptual_loss + self.make_ld * makeup_loss
+            d_loss = self.adv_ld * (-1) * d_loss
 
-        ''' define training variables '''
-        if train_op:
-            d_S_vars = [var for var in self.model_vars if "d_S" in var.name]
-            d_R_vars = [var for var in self.model_vars if "d_R" in var.name]
-            # g_S_vars = [var for var in self.model_vars if "g_S" in var.name]
-            # g_R_vars = [var for var in self.model_vars if "g_R" in var.name]
-            g_vars = [var for var in self.model_vars if "generator" in var.name]
+            optimizer = tf.train.AdamOptimizer(self.lr, beta1=0.5)
 
-            self.d_S_trainer = optimizer.minimize(d_loss_S, var_list=d_S_vars)
-            self.d_R_trainer = optimizer.minimize(d_loss_R, var_list=d_R_vars)
-            # self.g_S_trainer = optimizer.minimize(g_loss_S, var_list=g_S_vars)
-            # self.g_R_trainer = optimizer.minimize(g_loss_R, var_list=g_R_vars)
-            self.g_trainer = optimizer.minimize(g_loss, var_list=g_vars)
-        else:
-            g_vars = [var for var in self.model_vars if "generator" in var.name]
-            d_vars = [var for var in self.model_vars if "discriminator" in var.name]
+            self.model_vars = tf.trainable_variables()
 
-            self.g_trainer = optimizer.minimize(g_loss, var_list=g_vars)
-            self.d_trainer = optimizer.minimize(d_loss, var_list=d_vars)
+            ''' define training variables '''
+            if train_op:
+                d_S_vars = [var for var in self.model_vars if "d_S" in var.name]
+                d_R_vars = [var for var in self.model_vars if "d_R" in var.name]
+                # g_S_vars = [var for var in self.model_vars if "g_S" in var.name]
+                # g_R_vars = [var for var in self.model_vars if "g_R" in var.name]
+                g_vars = [var for var in self.model_vars if "generator" in var.name]
 
-        for var in self.model_vars:
-            print(var.name)
+                self.d_S_trainer = optimizer.minimize(d_loss_S, var_list=d_S_vars)
+                self.d_R_trainer = optimizer.minimize(d_loss_R, var_list=d_R_vars)
+                # self.g_S_trainer = optimizer.minimize(g_loss_S, var_list=g_S_vars)
+                # self.g_R_trainer = optimizer.minimize(g_loss_R, var_list=g_R_vars)
+                self.g_trainer = optimizer.minimize(g_loss, var_list=g_vars)
+            else:
+                g_vars = [var for var in self.model_vars if "generator" in var.name]
+                d_vars = [var for var in self.model_vars if "discriminator" in var.name]
 
-        # Summary variables for tensorboard
-        self.g_S_loss_sum = tf.summary.scalar('g_S_loss', g_loss_S)
-        self.g_R_loss_sum = tf.summary.scalar('g_R_loss', g_loss_R)
-        self.cyc_loss_sum = tf.summary.scalar('cyc_loss', cyc_loss)
-        self.makeup_loss_sum = tf.summary.scalar('makeup_loss', makeup_loss)
-        self.percep_loss_sum = tf.summary.scalar('perceptual_loss', perceptual_loss)
-        self.g_loss_sum = tf.summary.scalar('g_loss', g_loss)
+                self.g_trainer = optimizer.minimize(g_loss, var_list=g_vars)
+                self.d_trainer = optimizer.minimize(d_loss, var_list=d_vars)
 
-        self.g_summary = tf.summary.merge([
-            self.g_S_loss_sum, self.g_R_loss_sum, self.cyc_loss_sum, self.makeup_loss_sum, self.percep_loss_sum, self.g_loss_sum,
-        ], "g_summary")
+            for var in self.model_vars:
+                print(var.name)
 
-        if train_op:
-            self.d_S_loss_sum = tf.summary.scalar('d_S_loss', d_loss_S)
-            self.d_R_loss_sum = tf.summary.scalar('d_R_loss', d_loss_R)
-            self.d_loss_sum = tf.summary.scalar('d_loss', d_loss)
+            # Summary variables for tensorboard
+            self.g_S_loss_sum = tf.summary.scalar('g_S_loss', g_loss_S)
+            self.g_R_loss_sum = tf.summary.scalar('g_R_loss', g_loss_R)
+            self.cyc_loss_sum = tf.summary.scalar('cyc_loss', cyc_loss)
+            self.makeup_loss_sum = tf.summary.scalar('makeup_loss', makeup_loss)
+            self.percep_loss_sum = tf.summary.scalar('perceptual_loss', perceptual_loss)
+            self.g_loss_sum = tf.summary.scalar('g_loss', g_loss)
 
-            self.d_summary = tf.summary.merge([self.d_S_loss_sum, self.d_R_loss_sum, self.d_loss_sum], 'd_summary')
-        else:
-            self.d_S_loss_sum = tf.summary.scalar('d_loss', d_loss)
+            self.g_summary = tf.summary.merge([
+                self.g_S_loss_sum, self.g_R_loss_sum, self.cyc_loss_sum, self.makeup_loss_sum, self.percep_loss_sum, self.g_loss_sum,
+            ], "g_summary")
+
+            if train_op:
+                self.d_S_loss_sum = tf.summary.scalar('d_S_loss', d_loss_S)
+                self.d_R_loss_sum = tf.summary.scalar('d_R_loss', d_loss_R)
+                self.d_loss_sum = tf.summary.scalar('d_loss', d_loss)
+
+                self.d_summary = tf.summary.merge([self.d_S_loss_sum, self.d_R_loss_sum, self.d_loss_sum], 'd_summary')
+            else:
+                self.d_S_loss_sum = tf.summary.scalar('d_loss', d_loss)
 
 
     def save_training_images(self, sess, epoch):
@@ -682,7 +671,8 @@ class PSGAN(object):
         init = (tf.local_variables_initializer(), tf.global_variables_initializer())
         saver = tf.train.Saver()
 
-        with tf.Session() as sess:
+        config = tf.ConfigProto(allow_soft_placement=True)
+        with tf.Session(config=config) as sess:
             sess.run(init)
             #sess.run(tf.local_variables_initializer())
             # Read input to nd array
@@ -705,7 +695,7 @@ class PSGAN(object):
 
                 # use linear decay ?
                 if self.decay_flag:
-                    if epoch < self.epoch:
+                    if epoch < self.decay_epoch:
                         curr_lr = self.init_lr
                     else:
                         #curr_lr = self.init_lr - self.init_lr * (epoch-self.epoch)/$decay_rate
