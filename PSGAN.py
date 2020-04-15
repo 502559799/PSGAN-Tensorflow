@@ -160,10 +160,10 @@ class PSGAN(object):
             imageY_W = y_rs.get_shape().as_list()[2]
             imageY_C = y_rs.get_shape().as_list()[3]
 
-            print("imageX_H : ", imageX_H)
-            print("imageX_W : ", imageX_W)
-            print("landmark_x : ", ldmk_x)  # 68 * 2
-            print("landmark_y : ", ldmk_y)
+            # print("imageX_H : ", imageX_H)
+            # print("imageX_W : ", imageX_W)
+            # print("landmark_x : ", ldmk_x)  # 68 * 2
+            # print("landmark_y : ", ldmk_y)
 
             # use meshgrid to construct grid_x gridy
             grid_y, grid_x = tf.meshgrid(tf.range(imageX_H), tf.range(imageX_W))
@@ -300,7 +300,7 @@ class PSGAN(object):
             # resize origin image to the same size of feature map to calculate relative postion feature
             x_init_temp = tf.image.resize_images(x_init, [mx_H, mx_W]) # 1*64*64*3
             y_init_temp = tf.image.resize_images(y_init, [my_H, my_W])
-            print("x_init_temp : ", x_init_temp)
+            #print("x_init_temp : ", x_init_temp)
             mmt_gm, mmt_bt = amm_callback(mdn_o, man_o, x_init, y_init, fm_H, fm_W, fm_C,
                                         x_68_coord, y_68_coord, mask_full, reuse=True, scope='amm_callback')  # C x H x W, C x H x W
             print("mmt_gm : ", mmt_gm) # 256, 64, 64
